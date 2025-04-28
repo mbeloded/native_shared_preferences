@@ -1,18 +1,15 @@
-// Copyright 2019 The Chromium Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style license that can be
-// found in the LICENSE file.
-
 package yeniellandestoy.native_shared_preferences;
 
 import android.annotation.TargetApi;
 import android.content.Context;
 import android.content.SharedPreferences;
-import android.os.AsyncTask;
 import android.os.Build;
 import android.util.Base64;
 import android.util.Log;
+
 import io.flutter.plugin.common.MethodCall;
 import io.flutter.plugin.common.MethodChannel;
+
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -20,17 +17,14 @@ import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.math.BigInteger;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
-/**
- * Implementation of the {@link MethodChannel.MethodCallHandler} for the plugin. It is also
- * responsible of managing the {@link SharedPreferences}.
- */
-@SuppressWarnings("unchecked")
 class MethodCallHandlerImpl implements MethodChannel.MethodCallHandler {
 
   private static final String SHARED_PREFERENCES_NAME = "FlutterSharedPreferences";
@@ -87,11 +81,11 @@ class MethodCallHandlerImpl implements MethodChannel.MethodCallHandler {
           if (number instanceof BigInteger) {
             BigInteger integerValue = (BigInteger) number;
             commitAsync(
-                preferences
-                    .edit()
-                    .putString(
-                        key, BIG_INTEGER_PREFIX + integerValue.toString(Character.MAX_RADIX)),
-                result);
+                    preferences
+                            .edit()
+                            .putString(
+                                    key, BIG_INTEGER_PREFIX + integerValue.toString(Character.MAX_RADIX)),
+                    result);
           } else {
             commitAsync(preferences.edit().putLong(key, number.longValue()), result);
           }
@@ -100,9 +94,9 @@ class MethodCallHandlerImpl implements MethodChannel.MethodCallHandler {
           String value = (String) call.argument("value");
           if (value.startsWith(LIST_IDENTIFIER) || value.startsWith(BIG_INTEGER_PREFIX)) {
             result.error(
-                "StorageError",
-                "This string cannot be stored as it clashes with special identifier prefixes.",
-                null);
+                    "StorageError",
+                    "This string cannot be stored as it clashes with special identifier prefixes.",
+                    null);
             return;
           }
           commitAsync(preferences.edit().putString(key, value), result);
@@ -110,7 +104,7 @@ class MethodCallHandlerImpl implements MethodChannel.MethodCallHandler {
         case "setStringList":
           List<String> list = call.argument("value");
           commitAsync(
-              preferences.edit().putString(key, LIST_IDENTIFIER + encodeList(list)), result);
+                  preferences.edit().putString(key, LIST_IDENTIFIER + encodeList(list)), result);
           break;
         case "commit":
           // We've been committing the whole time.
@@ -143,20 +137,22 @@ class MethodCallHandlerImpl implements MethodChannel.MethodCallHandler {
     }
   }
 
-  @TargetApi(Build.VERSION_CODES.CUPCAKE)
-  private void commitAsync(
-      final SharedPreferences.Editor editor, final MethodChannel.Result result) {
-    new AsyncTask<Void, Void, Boolean>() {
-      @Override
-      protected Boolean doInBackground(Void... voids) {
-        return editor.commit();
-      }
+  // Replace AsyncTask with ExecutorService
+  private void commitAsync(final SharedPreferences.Editor editor, final MethodChannel.Result result) {
+    ExecutorService executor = Executors.newSingleThreadExecutor();
+    Future<Boolean> future = executor.submit(() -> editor.commit());
 
-      @Override
-      protected void onPostExecute(Boolean value) {
+    // Once the operation is finished, handle the result
+    executor.submit(() -> {
+      try {
+        Boolean value = future.get();
         result.success(value);
+      } catch (Exception e) {
+        result.error("Error", "Failed to commit preferences", e);
+      } finally {
+        executor.shutdown();
       }
-    }.execute();
+    });
   }
 
   private List<String> decodeList(String encodedList) throws IOException {
